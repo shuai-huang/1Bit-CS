@@ -1,7 +1,7 @@
 # 1-bit Compressive Sensing via AMP with Built-in Parameter Estimation
 * `1-bit Compressive Sensing` (CS) tries to recover a sparse signal from quantized 1-bit measurements.
 * `1-bit CS` can be straightforwardly extended to `multi-bit CS` that tries to recover a sparse signal from quantized multi-bit measurements.
-* We propose to solve the two problems using the proposed `AMP with built-in parameter estimation` (**AMP-PE**).
+* We propose to solve the two problems using the proposed `AMP with built-in parameter estimation` (**AMP-PE**) [1].
 * AMP-PE offers a much simpler way to estimate the distribution parameters, which allows us to directly work with true quantization noise models.
 ![quantization](quantization.png){width=100%}
 
@@ -29,7 +29,7 @@ If you use this package and find it helpful, please cite the above paper. Thanks
 ```
 ## Usage
 
-AMP-PE adopts the GAMP formulation by Sundeep Rangan, and, correspondingly, there are two versions of the AMP-PE algoritm:
+AMP-PE adopts the GAMP formulation [2], and, correspondingly, there are two versions of the AMP-PE algoritm:
 
 * The `vector` AMP-PE: As shown in Algorithm 1 of our paper, the component-wise "square" of the measurement matrix `A`, i.e. `A.^2`, is used to compute the variances of the variables. 
 * The `scalar` AMP-PE: This is a simplification to the vector AMP-PE. The `M` by `N` matrix `A.^2` is no longer supplied. Every entry `|a_{mn}|^2` of `A.^2` is approximated by `(||A||_F^2)/(MN)`, where `||A||_F` is the Frobenius norm of `A`.
@@ -62,3 +62,9 @@ Open `MATLAB` and type the following commands into the console:
     >> noisy_SE_2bit
     >> noisy_SE_3bit
 ```
+
+
+## Reference
+
+[1] S. Huang and T. D. Tran, "Sparse signal recovery using generalized approximate message passing with built-in parameter estimation," in Proceedings of IEEE ICASSP, March 2017, pp. 4321–4325.
+[2] S. Rangan, "Generalized approximate message passing for estimation with random linear mixing," in Proceedings of IEEE ISIT,  July 2011, pp. 2168–2172.
