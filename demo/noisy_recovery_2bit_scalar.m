@@ -12,7 +12,7 @@ LN_num = 2;						% the number of computing threads
 LN = maxNumCompThreads(LN_num);	% set the largest number of computing threads
 
 max_pe_ite = 20;		% the maximum number of iterations for AMP-PE and AMP-AWGN
-max_pe_inner_ite = 20;	% the maximum number of inner iterations to estimate the parameters
+max_pe_inner_ite = 10;	% the maximum number of inner iterations to estimate the parameters
 max_oracle_ite = 20;	% the maximum number of iterations for AMP-oracle, note that for some cases, AMP-oracle needs more iterations to get the best performance
 max_ite = 1000;			% the maximum number of iterations for IHT, OMP, CoSaMP, L1-min
 cvg_thd = 1e-6; 		% convergence threshold
@@ -32,14 +32,14 @@ for (i=(1:(2^bit_num -1)))
 end
 quant_thd = [quant_thd quant_thd_max];
 
-snr_seq_mat = [];	% the matrix holding all the signal to noise ration values
+nmse_seq_mat = [];	% the matrix holding all the signal to noise ration values
 
 % run 10 random trials here
 for (trial_num = 1:10)
     fprintf('Trial %d\n', trial_num)
 
     rng(trial_num); % set random seed
-    snr_seq = [];	% the vector holding the snr values at each random trial
+    nmse_seq = [];	% the vector holding the nmse values at each random trial
 
     %%%%%%%%%%%%%%%%%%%
     %% create signal %%
@@ -220,8 +220,12 @@ for (trial_num = 1:10)
     [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_scalar(A, y, gamp_par, input_par, output_par);
 
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
+    end
+    nmse_seq = [nmse_seq nmse_val];
 
     
     %%%%%%%%%%%%%%%%%%%%%%%
@@ -231,8 +235,12 @@ for (trial_num = 1:10)
     [res, input_par_new, output_par_new] = gamp_bgm_scalar(A, y_quant, gamp_par, input_par, output_par);
     
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
+    end
+    nmse_seq = [nmse_seq nmse_val];
 
     
     %%%%%%%%%%%%%%%%%%
@@ -254,8 +262,12 @@ for (trial_num = 1:10)
     res = ssr_iht_multi_bit_k(y_quant_normalized, A_normalized, Par, K);
 
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res/sum(abs(res))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
 
     
     %%%%%%%%%%%%%%%%%%
@@ -274,8 +286,12 @@ for (trial_num = 1:10)
     res = OMP_init(A, y_quant, K, Par);
 
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res/sum(abs(res))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
     
     
     %%%%%%%%%%%%%%%%%%%%%
@@ -296,8 +312,12 @@ for (trial_num = 1:10)
     res = CoSaMP_init_fast(A, y_quant, K, Par);
 
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res/sum(abs(res))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
 
     
     %%%%%%%%%%%%%%%%%%%%%
@@ -324,8 +344,12 @@ for (trial_num = 1:10)
     res = ssr_l1(y_quant, A, Par, lambda_reg);
 
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res/sum(abs(res))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
     
     
     %%%%%%%%%%%%%%%%%%%%%%%%%
@@ -358,29 +382,33 @@ for (trial_num = 1:10)
     [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_scalar_oracle(A, y, gamp_par, input_par, output_par);
     
 	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-    snr_val = snr(x, res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x);
-    snr_seq = [snr_seq snr_val];
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
+    end
+    nmse_seq = [nmse_seq nmse_val];
 
 	
-	% save teh snr values from each random trial to snr_seq_mat
-	snr_seq_mat = [snr_seq_mat; snr_seq];
+	% save the nmse values from each random trial to nmse_seq_mat
+	nmse_seq_mat = [nmse_seq_mat; nmse_seq];
 	
 end
 
-% plot the snr values from different approaches
-snr_seq_mean = mean(snr_seq_mat);
-snr_seq_upper = std(snr_seq_mat);
-snr_seq_lower = std(snr_seq_mat);
+% plot the nmse values from different approaches
+nmse_seq_mean = mean(nmse_seq_mat);
+nmse_seq_upper = std(nmse_seq_mat);
+nmse_seq_lower = std(nmse_seq_mat);
 
-snr_x = categorical({'AMP-PE', 'AMP-AWGN', 'IHT', 'OMP', 'CoSaMP', 'L1-Min', 'AMP-Oracle'});
-snr_x = reordercats(snr_x, {'AMP-PE', 'AMP-AWGN', 'IHT', 'OMP', 'CoSaMP', 'L1-Min', 'AMP-Oracle'});
+nmse_x = categorical({'AMP-PE', 'AMP-AWGN', 'IHT', 'OMP', 'CoSaMP', 'L1-Min', 'AMP-Oracle'});
+nmse_x = reordercats(nmse_x, {'AMP-PE', 'AMP-AWGN', 'IHT', 'OMP', 'CoSaMP', 'L1-Min', 'AMP-Oracle'});
 
 figure;
-bar(snr_x, snr_seq_mean);
-ylabel('SNR (dB)')
+bar(nmse_x, nmse_seq_mean);
+ylabel('NMSE (dB)')
 title('2-bit CS: M/N=2, S/N=10%, \sigma_w=0.02')
 hold on
-er = errorbar(snr_x, snr_seq_mean, snr_seq_lower, snr_seq_upper);
+er = errorbar(nmse_x, nmse_seq_mean, nmse_seq_lower, nmse_seq_upper);
 er.Color = [0 0 0];
 er.LineStyle = 'none';
 hold off

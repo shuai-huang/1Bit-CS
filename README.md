@@ -8,7 +8,7 @@
 * This package contains code files to implement the approach described in the following paper.
 ```
 @article{1bitCS_AMP_PE,
-    author    = {Shuai Huang and Trac D. Tran},
+    author    = {Shuai Huang, Deqiang Qiu and Trac D. Tran},
     title     = {1-Bit Compressive Sensing via Approximate Message Passing with Built-in Parameter Estimation},
     journal   = {CoRR},
     volume    = {abs/2007.07679},
@@ -61,6 +61,13 @@ Open `MATLAB` and type the following commands into the console:
     >> noisy_SE_1bit
     >> noisy_SE_2bit
     >> noisy_SE_3bit
+```
+* Step 4) Run the channel estimation experiments.
+```
+	>> addpath(genpath('./'))
+	>> noisy_channel_estiamtion_1bit
+	>> noisy_channel_estiamtion_2bit
+	>> noisy_channel_estiamtion_3bit
 ```
 
 

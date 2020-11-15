@@ -14,7 +14,7 @@ LN_num = 2;						% the number of computing threads
 LN = maxNumCompThreads(LN_num);	% set the largest number of computing threads
 
 max_pe_ite = 20;		% the maximum number of iterations for AMP-PE and AMP-AWGN
-max_pe_inner_ite = 20;	% the maximum number of inner iterations to estimate the parameters
+max_pe_inner_ite = 10;	% the maximum number of inner iterations to estimate the parameters
 cvg_thd = 1e-6; 		% convergence threshold
 kappa = 1;      		% learning rate or damping rate
 verbose = 0;			% "1" - output convergence values in every iteration; "0" - do not output convergence values in every iteration
