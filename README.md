@@ -64,10 +64,10 @@ Open `MATLAB` and type the following commands into the console:
 ```
 * Step 4) Run the channel estimation experiments.
 ```
-	>> addpath(genpath('./'))
-	>> noisy_channel_estiamtion_1bit
-	>> noisy_channel_estiamtion_2bit
-	>> noisy_channel_estiamtion_3bit
+    >> addpath(genpath('./'))
+    >> noisy_channel_estimation_1bit
+    >> noisy_channel_estimation_2bit
+    >> noisy_channel_estimation_3bit
 ```
 
 
