@@ -4,7 +4,7 @@ function [res, input_par, output_par] = gamp_bgm(A, y, tune_idx, gamp_par, input
 
     % use MMSE formulation of GAMP with scalar variance
     % the prior distribution of the input channel is Bernoulli-Gaussian mixture
-    % the prior distribution of the output channel is white-Gaussian
+    % the prior distribution of the output channel is multi-bit quantization noise model
     M   = size(A,1);    % the dimensionality of the measurement y
     N   = size(A,2);    % the dimensionality of the signal x
     

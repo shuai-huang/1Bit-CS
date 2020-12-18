@@ -2,7 +2,7 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
 
     % use MMSE formulation of GAMP with scalar variance
     % the prior distribution of the input channel is Bernoulli-Gaussian mixture
-    % the prior distribution of the output channel is white-Gaussian
+    % the prior distribution of the output channel is multi-bit quantization noise model
     M   = size(A,1);    % the dimensionality of the measurement y
     N   = size(A,2);    % the dimensionality of the signal x
     
@@ -41,6 +41,12 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
         y_lower(i) = quant_thd(y(i)-1);
         y_upper(i) = quant_thd(y(i));
     end
+    
+    % set the lower bound and upper bound to -inf and +inf
+    % maybe have an option flag to determine whether to do this or not
+    y_lower(1) = -Inf;
+    y_upper(length(y_upper)) = Inf;
+
 
     tau_p = A_sq * tau_x;
     p_hat = A * x_hat - tau_p .* s_hat;
