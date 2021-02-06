@@ -8,7 +8,7 @@
 * This package contains code files to implement the approach described in the following paper.
 ```
 @article{1bitCS_AMP_PE,
-    author    = {Shuai Huang, Deqiang Qiu and Trac D. Tran},
+    author    = {Shuai Huang and Deqiang Qiu and Trac D. Tran},
     title     = {1-Bit Compressive Sensing via Approximate Message Passing with Built-in Parameter Estimation},
     journal   = {CoRR},
     volume    = {abs/2007.07679},
