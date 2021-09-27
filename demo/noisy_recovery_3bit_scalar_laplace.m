@@ -1,15 +1,12 @@
-sigma = 2;			% the oversampling ratio, i.e. beta
+sigma = 2;			% the oversampling ratio
 rho = 0.1;			% the sparsity ratio
-N = 10000;       	% the signal length
+N = 1000;       	% the signal length
 M = sigma*N;      	% the number of measurements
 S = ceil(rho*N);  	% the number of nonzero entries
 
-
-mc_num = 200000; 	% the number of Monte Carlo simulates to calculate the expectations in the paper
-
 num_c_true = 1; 	% the true number of Gaussian mixtures
 meas_snr_val = 30;	% pre-quantization SNR (dB)
-gaussian_num = 1;   % the standard deviation of Gaussian component in BGM prior
+laplace_num = 1;   % the standard deviation of Gaussian component in BGM prior
 bit_num = 3;		% the quantization bit number
 
 LN_num = 2;						% the number of computing threads
@@ -17,30 +14,31 @@ LN = maxNumCompThreads(LN_num);	% set the largest number of computing threads
 
 max_pe_ite = 20;		% the maximum number of iterations for AMP-PE and AMP-AWGN
 max_pe_inner_ite = 20;	% the maximum number of inner iterations to estimate the parameters
+max_oracle_ite = 20;	% the maximum number of iterations for AMP-oracle, note that for some cases, AMP-oracle needs more iterations to get the best performance
+max_ite = 1000;			% the maximum number of iterations for IHT, OMP, CoSaMP, L1-min
 cvg_thd = 1e-6; 		% convergence threshold
-kappa = 1;      		% damping rate for parameter estimation
+kappa = 0.1;      		% damping rate in parameter estimation
+eta = 1;                % damping rate in signal recovery
 verbose = 0;			% "1" - output convergence values in every iteration; "0" - do not output convergence values in every iteration
 
 % set the quantization thresholds and step size properly
 % they need to be adjusted for different signals
-quant_thd_min = -1;										% the minimum quantization threshold
-quant_thd_max = 1;										% the maximum quantization threshold
+quant_thd_min = -1;             % the minimum quantization threshold
+quant_thd_max = 1;              % the maximum quantization threshold
 % just make sure the precision is high enough when rho = 0.1
 if (rho==0.1)
-    quant_thd_min = -1.3;
-    quant_thd_max = 1.3;
-end 
-if (rho==0.5)
-    quant_thd_min=-2.7;
-    quant_thd_max=2.7;
-end 
-if (rho==1)
-    quant_thd_min=-4;
-    quant_thd_max=4;
+    quant_thd_min = -60;
+    quant_thd_max = 60; 
+elseif (rho==0.5)
+    quant_thd_min = -120;
+    quant_thd_max = 120;
+elseif (rho==1)
+    quant_thd_min = -180;
+    quant_thd_max = 180;
+else
 end 
 
-
-quant_step = (quant_thd_max-quant_thd_min)/(2^bit_num);	% quantizatin step size
+quant_step = (quant_thd_max-quant_thd_min)/(2^bit_num);     % quantizatin step size
 
 % compute the quantization thresholds
 quant_thd = quant_thd_min;
@@ -49,14 +47,14 @@ for (i=(1:(2^bit_num -1)))
 end
 quant_thd = [quant_thd quant_thd_max];
 
-mse_seq_mat = [];	% the matrix holding all the signal to noise ration values
+nmse_seq_mat = [];	% the matrix holding all the signal to noise ration values
 
 % run 10 random trials here
 for (trial_num = 1:10)
     fprintf('Trial %d\n', trial_num)
 
     rng(trial_num); % set random seed
-    snr_seq = [];	% the vector holding the snr values at each random trial
+    nmse_seq = [];	% the vector holding the nmse values at each random trial
 
     %%%%%%%%%%%%%%%%%%%
     %% create signal %%
@@ -67,15 +65,12 @@ for (trial_num = 1:10)
     omega_true = omega_true/sum(omega_true);
 
     nonzeroW = [];      % nonzero entries
-    theta_true = [];    % true Gaussian mixtures means
-    phi_true = [];      % true Gaussian mixtures variances
+    theta_true = [];    % true Laplace mixtures means
     for (i=1:num_c_true)
         theta_tmp = 0;  % make sure the mean is 0 for this particular 1bit CS 
         theta_true = [theta_true; theta_tmp];
-        phi_tmp = gaussian_num;	% fix the variance to make sure the noise level is fixed
-        phi_true = [phi_true; phi_tmp];
         S_tmp = round(S*omega_true(i));
-        nonzeroW = [nonzeroW; normrnd(theta_tmp, gaussian_num, S_tmp, 1)];  % the nonzero entries
+        nonzeroW = [nonzeroW; laprnd(S_tmp, 1, theta_tmp, laplace_num)];
     end
 
     % double check since we rounded the number  before
@@ -88,19 +83,21 @@ for (trial_num = 1:10)
     x = zeros(N, 1);
     x(indice) = nonzeroW;   % true signal
 
-    % the measurement matrix A, this is different from the experimental section
-    A = randn(M,N) * 1/sqrt(M);
+    % the measurement matrix A
+    A = randn(M,N);
 
 	% needed for scalar-version AMP computation    
     A_sq_sum = norm(A, 'fro')^2;  % compute the squared frobenius norm of A
-
-    y_noiseless = A*x;    % noiseless linear measurements
     
+    y_noiseless = A*x;    % noiseless linear measurements
     noise_ori = normrnd(0, 1, size(y_noiseless));
     mut_factor = sqrt(sum(y_noiseless.^2)/sum(noise_ori.^2) / 10^(meas_snr_val/10));
 
-    y_ori = y_noiseless + mut_factor * noise_ori;   % noisy measurements
+    if (meas_snr_val>100)
+        mut_factor = 0;
+    end
 
+    y_ori = y_noiseless + mut_factor * noise_ori;
 
     % convert "y_ori" to quantized symbols "y" in the set {2,3,4,5,6,...}
     % "y_quant" is the "low resolution" version of the "y_ori"
@@ -175,7 +172,7 @@ for (trial_num = 1:10)
 
     % initialize input distribution parameters
     lambda = 0.1;			% the sparsity ratio
-	num_c = 1;				% the number of Gaussian mixture component
+	num_c = 5;				% the number of Gaussian mixture component
 
     % initialize Gaussian mixtures parameters
     theta=zeros(num_c, 1);  % Gaussian mean
@@ -196,6 +193,9 @@ for (trial_num = 1:10)
             omega(i) = 0;
         end
     end
+    
+    gamma = 0.01;               % the weight of the outlier distribution (a zero-mean Gaussian)
+    psi = var(x_hat_nz)+1e-12;  % the variance of the outlier distribution (a zero-mean Gaussian)
 
     % initialize white Gaussian noise variance
     tau_w = 1e-6;
@@ -208,14 +208,13 @@ for (trial_num = 1:10)
     gamp_par.max_pe_ite    = max_pe_ite;	% maximum number of iterations for AMP
     gamp_par.max_pe_inner_ite = max_pe_inner_ite;	% maximum number of inner iterations for parameter estimation
     gamp_par.cvg_thd    = cvg_thd; 			% the convergence threshold
-    gamp_par.kappa      = kappa;   			% learning rate
+    gamp_par.kappa      = kappa;   			% damping rate for parameter estimation
+    gamp_par.eta        = eta;              % damping rate for signal recovery
     gamp_par.verbose	= verbose;			% "0" or "1", decides whether to output convergence values in each iteration
 
     gamp_par.x_hat      = x_hat; 		  			% initialize with all zero vector
-    gamp_par.tau_x      = var(x);					% true signal variance here since we are doing state evolution
+    gamp_par.tau_x      = tau_x;		% signal variance
     gamp_par.s_hat      = s_hat;   					% dummy variable from output function
-    
-    gamp_par.x_true		= x;		% true signal used to calculate MSE
 
     % set input distribution parameters
     input_par.lambda    = lambda;	% the sparsity ratio
@@ -223,6 +222,9 @@ for (trial_num = 1:10)
     input_par.phi       = phi;    	% the variances of the Gaussian mixtures
     input_par.omega     = omega;  	% the weights of the Gaussian mixtures
     input_par.num_c     = num_c;  	% the number of Gaussian mixtures
+    input_par.gamma     = gamma;    % the weight of the outlier distribution (a zero-mean Gaussian)
+    input_par.psi       = psi;      % the variance of the outlier distribution (a zero-mean Gaussian)
+
 
     % set output distribution parameters
     output_par.tau_w    = tau_w; 		% the white-Gaussian noise variance
@@ -235,74 +237,166 @@ for (trial_num = 1:10)
     %% AMP-PE recovery %%
     %%%%%%%%%%%%%%%%%%%%%
 
-    [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_scalar_SE_verify(A, y, gamp_par, input_par, output_par);
+    [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_scalar(A, y, gamp_par, input_par, output_par);
 
-    mse_seq_tmp = zeros(1,max_pe_ite+1);
-    mse_seq_tmp(1:length(res.mse_seq)) = res.mse_seq;
-    mse_seq_mat = [mse_seq_mat; mse_seq_tmp];
+	% for 1-bit CS the magnitude info is lost, we need to normalize it first
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
+    end
+    nmse_seq = [nmse_seq nmse_val];
+
     
+    %%%%%%%%%%%%%%%%%%%%%%%
+    %% AMP-AWGN recovery %%
+    %%%%%%%%%%%%%%%%%%%%%%%
+    
+    [res, input_par_new, output_par_new] = gamp_bgm_scalar(A, y_quant, gamp_par, input_par, output_par);
+    
+	% for 1-bit CS the magnitude info is lost, we need to normalize it first
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
+    end
+    nmse_seq = [nmse_seq nmse_val];
+
+    
+    %%%%%%%%%%%%%%%%%%%
+    %% QIHT recovery %%
+    %%%%%%%%%%%%%%%%%%%
+    x_hat = zeros(N,1);
+
+    % normalized the matrix and measurements as required by iterative hard thresholding
+    [U, S_diag, V] = eig(A'*A);
+    A_normalized = A/sqrt(max(diag(S_diag)));
+    y_quant_normalized = y_quant/sqrt(max(diag(S_diag)));
+
+    Par.tol = cvg_thd;
+    Par.X0 = x_hat;
+    Par.maxiter = max_ite;
+    Par.quant_thd = quant_thd/sqrt(max(diag(S_diag)));
+    Par.normalization_cst = sqrt(max(diag(S_diag)));
+
+    K = length(nonzeroW);
+
+    res = ssr_qiht_multi_bit_k(y_quant_normalized, A_normalized, Par, K);
+
+	% for 1-bit CS the magnitude info is lost, we need to normalize it first
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
+
+    
+    %%%%%%%%%%%%%%%%%%
+    %% OMP recovery %%
+    %%%%%%%%%%%%%%%%%%
+    
+    % initialize with zero vector
+    x_hat = zeros(N,1);
+
+	clear Par;
+    Par.X0 = x_hat;
+    Par.maxiter = max_ite;
+
+    K = length(nonzeroW);
+
+    res = OMP_init(A, y_quant, K, [], Par);
+
+	% for 1-bit CS the magnitude info is lost, we need to normalize it first
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
+    
+    
+    %%%%%%%%%%%%%%%%%%%%%
+    %% CoSaMP recovery %%
+    %%%%%%%%%%%%%%%%%%%%%
+    
+    % initialize with zero vector
+    x_hat = zeros(N,1);
+
+	clear Par;
+    Par.normTol = cvg_thd;
+    Par.support_tol = cvg_thd;
+    Par.X0 = x_hat;
+    Par.maxiter = max_ite;
+
+    K = length(nonzeroW);
+
+    res = CoSaMP_init_fast(A, y_quant, K, Par);
+
+	% for 1-bit CS the magnitude info is lost, we need to normalize it first
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
+
+    
+    %%%%%%%%%%%%%%%%%%%%%
+    %% L1-Min recovery %%
+    %%%%%%%%%%%%%%%%%%%%%
+    
+    % initialize with zero vector
+    x_hat = zeros(N,1);
+
+	clear Par;
+    Par.tol = cvg_thd;
+    Par.X0 = x_hat;
+    Par.maxiter = max_ite;
+    Par.innermaxiter = 1;
+    Par.epsilon = 1e-12;
+    [U, S_diag, V] = eig(A'*A);
+    Par.kappa = 2*max(diag(S_diag));    % the Lipschitz constant
+    Par.fun = 'l1';
+    Par.p = 1;
+
+    %%%%%%%%%%%%%
+	%% *must* tune the regularization parameter lambda_reg for different types of signals
+	%%%%%%%%%%%%%
+	
+	lambda_reg = 550;
+
+    res = ssr_l1(y_quant, A, Par, lambda_reg);
+
+	% for 1-bit CS the magnitude info is lost, we need to normalize it first
+	if (bit_num==1)
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
+    else
+    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
+    end
+    nmse_seq = [nmse_seq nmse_val];
+
+	
+	% save the nmse values from each random trial to nmse_seq_mat
+	nmse_seq_mat = [nmse_seq_mat; nmse_seq];
+	
 end
 
+% plot the nmse values from different approaches
+nmse_seq_mean = mean(nmse_seq_mat);
+nmse_seq_upper = std(nmse_seq_mat);
+nmse_seq_lower = std(nmse_seq_mat);
 
-    
-%%%%%%%%%%%%%%%%%%%%%
-%% State Evolution %%
-%%%%%%%%%%%%%%%%%%%%%
+nmse_x = categorical({'AMP-PE', 'AMP-AWGN', 'QIHT', 'OMP', 'CoSaMP', 'L1-Min'});
+nmse_x = reordercats(nmse_x, {'AMP-PE', 'AMP-AWGN', 'QIHT', 'OMP', 'CoSaMP', 'L1-Min'});
 
-% use the initial parameters from the last random trial to do the SE
-
-clear gamp_par input_par output_par;
-
-% set GAMP parameters
-gamp_par.max_pe_ite    = max_pe_ite;	% maximum number of iterations for AMP
-gamp_par.max_pe_inner_ite = max_pe_inner_ite;	% maximum number of inner iterations for parameter estimation
-gamp_par.cvg_thd    = cvg_thd; 			% the convergence threshold
-gamp_par.kappa      = kappa;   			% learning rate
-gamp_par.verbose	= verbose;			% "0" or "1", decides whether to output convergence values in each iteration
-
-gamp_par.tau_x		= var(x);		% true signal variance here since we are doing state evolution
-gamp_par.mc_num		= mc_num;		% the number of Monte Carlo simulations used to calculate the expectations
-gamp_par.beta		= M/N;			% the oversampling ratio
-
-% set input distribution parameters
-input_par.lambda    = lambda;	% the sparsity ratio
-input_par.theta     = theta;	% the means of the Gaussian mixtures
-input_par.phi       = phi;    	% the variances of the Gaussian mixtures
-input_par.omega     = omega;  	% the weights of the Gaussian mixtures
-input_par.num_c     = num_c;  	% the number of Gaussian mixtures
-
-% set true input distribution parameters
-input_par.lambda_true = rho;
-input_par.theta_true = theta_true;
-input_par.phi_true = phi_true;
-input_par.omega_true = omega_true;
-input_par.num_c_true = num_c_true;
-
-% set output distribution parameters
-output_par.tau_w    = tau_w; 		% the white-Gaussian noise variance
-
-% set true output distribution parameters
-output_par.tau_w_true    = mut_factor^2; 		% the white-Gaussian noise variance
-
-output_par.quant_thd = quant_thd; 	% quantization threshold
-
-[res, input_par_new, output_par_new] = gamp_bgm_multi_bit_scalar_SE(gamp_par, input_par, output_par);
-
-% res.tau_x_seq is the predicted MSE values through the iterations
-
-
-% plot the predicted MSE values from state evolution and the actual MSE values from the random trials
 figure;
-ite_seq = 1:(max_pe_ite+1);
-for (i=1:size(mse_seq_mat,1))
-plot(ite_seq, mse_seq_mat(i,:))
+bar(nmse_x, nmse_seq_mean);
+ylabel('NMSE (dB)')
+title({'Nonzero entries follow Laplace distribution','3-bit CS: M/N=2, E/N=10%, pre-QNT SNR=30dB'})
 hold on
-end
-plot(ite_seq, res.tau_x_seq, '--k', 'LineWidth', 2)
-set(gca, 'YScale', 'log')
-ylabel('MSE (log scale)')
-xlabel('Iteration')
-title('3-bit CS: M/N=2, E/N=10%, pre-QNT SNR=30dB')
-legend('Random trial 1','Random trial 2','Random trial 3','Random trial 4','Random trial 5','Random trial 6','Random trial 7','Random trial 8','Random trial 9','Random trial 10','State Evolution')
+er = errorbar(nmse_x, nmse_seq_mean, nmse_seq_lower, nmse_seq_upper);
+er.Color = [0 0 0];
+er.LineStyle = 'none';
 hold off
 

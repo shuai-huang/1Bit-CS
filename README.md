@@ -1,4 +1,4 @@
-# 1-bit Compressive Sensing via AMP with Built-in Parameter Estimation
+# 1-bit and Multi-bit Compressive Sensing via AMP with Parameter Estimation
 * `1-bit Compressive Sensing` (CS) tries to recover a sparse signal from quantized 1-bit measurements.
 * `1-bit CS` can be straightforwardly extended to `multi-bit CS` that tries to recover a sparse signal from quantized multi-bit measurements.
 * We propose to solve the two problems using the proposed `AMP with built-in parameter estimation` (**AMP-PE**) [1].
@@ -29,40 +29,39 @@ If you use this package and find it helpful, please cite the above paper. Thanks
 ```
 ## Usage
 
-AMP-PE adopts the GAMP formulation [2], and, correspondingly, there are two versions of the AMP-PE algoritm:
-
-* The `vector` AMP-PE: As shown in Algorithm 1 of our paper, the component-wise "square" of the measurement matrix `A`, i.e. `A.^2`, is used to compute the variances of the variables. 
-* The `scalar` AMP-PE: This is a simplification to the vector AMP-PE. The `M` by `N` matrix `A.^2` is no longer supplied. Every entry `|a_{mn}|^2` of `A.^2` is approximated by `(||A||_F^2)/(MN)`, where `||A||_F` is the Frobenius norm of `A`.
-
-The `scalar` AMP-PE is faster than `vector` AMP-PE.
+AMP-PE adopts the GAMP formulation [2] to perform message passing. 
 
 You can follow the following steps to run the program. Detailed comments are within each demo file.
 
 
 Open `MATLAB` and type the following commands into the console:
 
-* Step 1) Try the `vector` AMP-PE to recover the signal from noisy 1-bit, 2-bit and 3-bit measurements.
+* Step 1) Recover the signal from noisy 1-bit, 2-bit and 3-bit measurements.
 ```
     >> addpath(genpath('./'))
-    >> noisy_recovery_1bit_vect
-    >> noisy_recovery_2bit_vect
-    >> noisy_recovery_3bit_vect
+    >> % nonzero entries of the signal follow Gaussian distribution
+    >> noisy_recovery_1bit_scalar_gaussian
+    >> noisy_recovery_2bit_scalar_gaussian
+    >> noisy_recovery_3bit_scalar_gaussian
+    >>
+    >> % nonzero entries of the signal follow Cauchy distribution
+    >> noisy_recovery_1bit_scalar_cauchy
+    >> noisy_recovery_2bit_scalar_cauchy
+    >> noisy_recovery_3bit_scalar_cauchy
+    >>
+    >> % nonzero entries of the signal follow Laplace distribution
+    >> noisy_recovery_1bit_scalar_laplace
+    >> noisy_recovery_2bit_scalar_laplace
+    >> noisy_recovery_3bit_scalar_laplace
 ```
-* Step 2) Try the `scalar` AMP-PE to recover the signal from noisy 1-bit, 2-bit and 3-bit measurements.
-```
-    >> addpath(genpath('./'))
-    >> noisy_recovery_1bit_scalar
-    >> noisy_recovery_2bit_scalar
-    >> noisy_recovery_3bit_scalar
-```
-* Step 3) Try the State Evolution (SE) analysis of the proposed AMP-PE approach.
+* Step 2) Perform State Evolution (SE) analysis of the proposed AMP-PE approach.
 ```
     >> addpath(genpath('./'))
     >> noisy_SE_1bit
     >> noisy_SE_2bit
     >> noisy_SE_3bit
 ```
-* Step 4) Run the channel estimation experiments.
+* Step 3) Run the channel estimation experiments.
 ```
     >> addpath(genpath('./'))
     >> noisy_channel_estimation_1bit

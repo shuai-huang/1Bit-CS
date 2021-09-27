@@ -4,25 +4,42 @@ N = 10000;       	% the signal length
 M = sigma*N;      	% the number of measurements
 S = ceil(rho*N);  	% the number of nonzero entries
 
+
 mc_num = 200000; 	% the number of Monte Carlo simulates to calculate the expectations in the paper
 
 num_c_true = 1; 	% the true number of Gaussian mixtures
-noise_std = 0.02;	% the noise standard deviation
+meas_snr_val = 30;	% pre-quantization SNR (dB)
+gaussian_num = 1;   % the standard deviation of Gaussian component in BGM prior
 bit_num = 2;		% the quantization bit number
 
 LN_num = 2;						% the number of computing threads
 LN = maxNumCompThreads(LN_num);	% set the largest number of computing threads
 
 max_pe_ite = 20;		% the maximum number of iterations for AMP-PE and AMP-AWGN
-max_pe_inner_ite = 10;	% the maximum number of inner iterations to estimate the parameters
+max_pe_inner_ite = 20;	% the maximum number of inner iterations to estimate the parameters
 cvg_thd = 1e-6; 		% convergence threshold
-kappa = 1;      		% learning rate or damping rate
+kappa = 1;      		% damping rate for parameter estimation
 verbose = 0;			% "1" - output convergence values in every iteration; "0" - do not output convergence values in every iteration
 
 % set the quantization thresholds and step size properly
 % they need to be adjusted for different signals
 quant_thd_min = -1;										% the minimum quantization threshold
 quant_thd_max = 1;										% the maximum quantization threshold
+% just make sure the precision is high enough when rho = 0.1
+if (rho==0.1)
+    quant_thd_min = -1.3;
+    quant_thd_max = 1.3;
+end 
+if (rho==0.5)
+    quant_thd_min=-2.7;
+    quant_thd_max=2.7;
+end 
+if (rho==1)
+    quant_thd_min=-4;
+    quant_thd_max=4;
+end 
+
+
 quant_step = (quant_thd_max-quant_thd_min)/(2^bit_num);	% quantizatin step size
 
 % compute the quantization thresholds
@@ -55,10 +72,10 @@ for (trial_num = 1:10)
     for (i=1:num_c_true)
         theta_tmp = 0;  % make sure the mean is 0 for this particular 1bit CS 
         theta_true = [theta_true; theta_tmp];
-        phi_tmp = 1;	% fix the variance to make sure the noise level is fixed
+        phi_tmp = gaussian_num;	% fix the variance to make sure the noise level is fixed
         phi_true = [phi_true; phi_tmp];
         S_tmp = round(S*omega_true(i));
-        nonzeroW = [nonzeroW; normrnd(theta_tmp, sqrt(phi_tmp), S_tmp, 1)];	% the nonzero entries
+        nonzeroW = [nonzeroW; normrnd(theta_tmp, gaussian_num, S_tmp, 1)];  % the nonzero entries
     end
 
     % double check since we rounded the number  before
@@ -78,8 +95,12 @@ for (trial_num = 1:10)
     A_sq_sum = norm(A, 'fro')^2;  % compute the squared frobenius norm of A
 
     y_noiseless = A*x;    % noiseless linear measurements
+    
+    noise_ori = normrnd(0, 1, size(y_noiseless));
+    mut_factor = sqrt(sum(y_noiseless.^2)/sum(noise_ori.^2) / 10^(meas_snr_val/10));
 
-    y_ori = y_noiseless + normrnd(0, noise_std, size(y_noiseless));	% noisy measurements
+    y_ori = y_noiseless + mut_factor * noise_ori;   % noisy measurements
+
 
     % convert "y_ori" to quantized symbols "y" in the set {2,3,4,5,6,...}
     % "y_quant" is the "low resolution" version of the "y_ori"
@@ -153,7 +174,7 @@ for (trial_num = 1:10)
     s_hat = zeros(M,1); 		% initialize s_hat with all zeros
 
     % initialize input distribution parameters
-    lambda = 0.5;			% the sparsity ratio
+    lambda = 0.1;			% the sparsity ratio
 	num_c = 1;				% the number of Gaussian mixture component
 
     % initialize Gaussian mixtures parameters
@@ -261,7 +282,7 @@ input_par.num_c_true = num_c_true;
 output_par.tau_w    = tau_w; 		% the white-Gaussian noise variance
 
 % set true output distribution parameters
-output_par.tau_w_true    = noise_std^2; 		% the white-Gaussian noise variance
+output_par.tau_w_true    = mut_factor^2; 		% the white-Gaussian noise variance
 
 output_par.quant_thd = quant_thd; 	% quantization threshold
 
@@ -281,7 +302,7 @@ plot(ite_seq, res.tau_x_seq, '--k', 'LineWidth', 2)
 set(gca, 'YScale', 'log')
 ylabel('MSE (log scale)')
 xlabel('Iteration')
-title('2-bit CS: M/N=2, S/N=10%, \sigma_w=0.02')
+title('2-bit CS: M/N=2, E/N=10%, pre-QNT SNR=30dB')
 legend('Random trial 1','Random trial 2','Random trial 3','Random trial 4','Random trial 5','Random trial 6','Random trial 7','Random trial 8','Random trial 9','Random trial 10','State Evolution')
 hold off
 

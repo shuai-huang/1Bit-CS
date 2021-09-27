@@ -3,15 +3,15 @@ Np_val = 4096;	%  Pilot block length
 bit_num = 2;	% the number of bits
 LN_num = 2;		% number of computing threads
 LN = maxNumCompThreads(LN_num);    
-tune_idx = 128;	% the damping index: operation on x_hat
+tune_idx = 128;	% the damping index for signal recovery: damping operation on x_hat
 verbose = 0;	% 1: print convergence info at every iteration; 0: do not print convergence info at every iteration
 
 % PE-AMP parameters
 num_c = 3;	% number of Gaussian mixture components
-max_pe_inner_ite = 10;	% maximum number of inner iterations to estimate the parameters 
+max_pe_inner_ite = 20;	% maximum number of inner iterations to estimate the parameters 
 max_pe_ite = 20;	% the maximum number of iterations for AMP-PE and AMP-AWGN
 cvg_thd = 1e-6; % convergence threshold
-kappa = 1;      % [0,1]: damping rate of parameter estimation
+kappa = 0.1;      % [0,1]: damping rate of parameter estimation
 eta = 0.5;		% [0,1]: damping rate of AMP iterations
 
 
@@ -388,6 +388,9 @@ for (trial_num = 1:10)
                             omega(i) = 0;
                         end
                     end
+                    
+                    gamma = 0.01;               % the weight of the outlier distribution (a zero-mean Gaussian)
+                    psi = var(x_hat_nz)+1e-12;  % the variance of the outlier distribution (a zero-mean Gaussian)
 
                     % white Gaussian noise variance initialization
                     tau_w = 1e-3;
@@ -412,6 +415,8 @@ for (trial_num = 1:10)
                     input_par.phi       = phi;    % the variances of the Gaussian mixtures
                     input_par.omega     = omega;  % the weights of the Gaussian mixtures
                     input_par.num_c     = num_c;  % the number of Gaussian mixtures
+                    input_par.gamma     = gamma;  % the weight of the outlier distribution (a zero-mean Gaussian)
+                    input_par.psi       = psi;    % the variance of the outlier distribution (a zero-mean Gaussian)
 
                     % set output distribution parameters
                     output_par.tau_w    = tau_w; % the white-Gaussian noise variance
@@ -527,8 +532,8 @@ nmse_seq_mean = mean(nmse_seq_mat);
 nmse_seq_upper = std(nmse_seq_mat);
 nmse_seq_lower = std(nmse_seq_mat);
 
-nmse_x = categorical({'AMP-PE', 'AMP-AWGN', 'IHT', 'L1-Min'});
-nmse_x = reordercats(nmse_x, {'AMP-PE', 'AMP-AWGN', 'IHT', 'L1-Min'});
+nmse_x = categorical({'AMP-PE', 'AMP-AWGN', 'QIHT', 'L1-Min'});
+nmse_x = reordercats(nmse_x, {'AMP-PE', 'AMP-AWGN', 'QIHT', 'L1-Min'});
 
 figure;
 bar(nmse_x, nmse_seq_mean);

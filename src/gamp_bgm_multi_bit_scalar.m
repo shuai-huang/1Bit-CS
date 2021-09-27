@@ -12,7 +12,8 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
     max_pe_ite = gamp_par.max_pe_ite;   % maximum number of iterations for AMP
     max_pe_inner_ite = gamp_par.max_pe_inner_ite;	% maximum number of iterations for parameter estimation
     cvg_thd = gamp_par.cvg_thd; % the convergence threshold
-    kappa   = gamp_par.kappa;   % learning rate or damping rate
+    kappa   = gamp_par.kappa;   % learning rate of parameter estimation
+    eta     = gamp_par.eta;     % damping rate of signal recovery
     
     x_hat   = gamp_par.x_hat;   % estimated signal
     tau_x   = gamp_par.tau_x;   % signal variance
@@ -26,6 +27,8 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
     phi     = input_par.phi;    % the variances of the Gaussian mixtures
     omega   = input_par.omega;  % the weights of the Gaussian mixtures
     num_c   = input_par.num_c;  % the number of Gaussian mixtures
+    gamma   = input_par.gamma;  % the weight of the outlier distribution (a zero-mean Gaussian distribution)
+    psi     = input_par.psi;    % the variance of the outlier distribution (a zero-mean Gaussian distribution)
     
     % set output distribution parameters
     tau_w   = output_par.tau_w; % the white-Gaussian noise variance
@@ -72,15 +75,19 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
         	omega_pre = omega;
         	theta_pre = theta;
         	phi_pre = phi;
+            gamma_pre = gamma;
+            psi_pre = psi;
         	
-            [lambda, omega, theta, phi] = input_parameter_est(r_hat, tau_r, lambda, omega, theta, phi, kappa);
+            [lambda, omega, theta, phi, gamma, psi] = input_parameter_est(r_hat, tau_r, lambda, omega, theta, phi, gamma, psi, kappa);
             
             cvg_lambda = max(abs((lambda_pre-lambda)./lambda));
             cvg_omega = max(abs((omega_pre-omega)./omega));
             cvg_theta = max(abs((theta_pre-theta)./theta));
             cvg_phi = max(abs((phi_pre-phi)./phi));
+            cvg_gamma = max(abs((gamma_pre-gamma)./gamma));
+            cvg_psi = max(abs((psi_pre-psi)./psi));
             
-            cvg_all_parameters = max([cvg_lambda cvg_omega cvg_theta cvg_phi]);
+            cvg_all_parameters = max([cvg_lambda cvg_omega cvg_theta cvg_phi cvg_gamma cvg_psi]);
             
             if (cvg_all_parameters<cvg_thd)
             	break;
@@ -88,7 +95,9 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
         end
 
         % input nonlinear step
-        [x_hat, tau_x] = input_function(r_hat, tau_r, lambda, omega, theta, phi);
+        x_hat_pre = x_hat;
+        [x_hat, tau_x] = input_function(r_hat, tau_r, lambda, omega, theta, phi, gamma, psi);
+        x_hat = x_hat_pre + eta*(x_hat-x_hat_pre);
 
         % output linear step
         tau_p = A_sq_sum/M * tau_x;
@@ -151,46 +160,46 @@ function [res, input_par, output_par] = gamp_bgm(A, y, gamp_par, input_par, outp
     res.tau_s = tau_r;
     
     % update input distribution parameters
-    input_par.lambda = lambda; % Bernoulli parameter
-    input_par.theta = theta;  % the means of the Gaussian mixtures
-    input_par.phi   = phi;    % the variances of the Gaussian mixtures
-    input_par.omega = omega;  % the weights of the Gaussian mixtures
+    input_par.lambda = lambda;  % Bernoulli parameter
+    input_par.theta = theta;    % the means of the Gaussian mixtures
+    input_par.phi   = phi;      % the variances of the Gaussian mixtures
+    input_par.omega = omega;    % the weights of the Gaussian mixtures
+    input_par.gamma = gamma;    % the weight of the outlier distribution (a zero-mean Gaussian distribution)
+    input_par.psi = psi;        % the variance of the outlier distribution (a zero-mean Gaussian distribution)
     
     % update output distribution parameters
     output_par.tau_w = tau_w; % the white-Gaussian noise variance
 
 end
 
-function [x_hat, tau_x] = input_function(r_hat, tau_r, lambda, omega, theta, phi)
+function [x_hat, tau_x] = input_function(r_hat, tau_r, lambda, omega, theta, phi, gamma, psi)
     
     dim_smp=length(r_hat);
     num_cluster=length(omega);
 
-    cluster_block_exp_mat = zeros(dim_smp, num_cluster);
-    for (i=1:num_cluster)
-        cluster_block_exp_mat(:,i) = -0.5 * ( (theta(i)-r_hat).^2 ./ (phi(i)+tau_r) );
-    end
-
-    cluster_block_exp_max = zeros(dim_smp, 1);
-    for (i=1:dim_smp)
-        cluster_block_exp_max(i) = max(cluster_block_exp_mat(i,:));
-    end
-
     block_mat = zeros(dim_smp, num_cluster);
     for (i=1:num_cluster)
-        block_mat(:,i) = omega(i) * sqrt(tau_r/(phi(i)+tau_r)) * exp( -cluster_block_exp_max -0.5 * (theta(i)-r_hat).^2 / (phi(i)+tau_r) );
+        block_mat(:,i) = (1-gamma) * omega(i) * sqrt(tau_r/(phi(i)+tau_r)) * exp( -0.5 * (theta(i)-r_hat).^2 / (phi(i)+tau_r) );
     end
 
     % compute x_hat
     block_mat_nmr_x = block_mat;
     for (i=1:num_cluster)
-        block_mat_nmr_x(:,i) = block_mat_nmr_x(:,i) .* (theta(i) * tau_r + r_hat * phi(i)) ./ (phi(i) + tau_r);
+        block_mat_nmr_x(:,i) = block_mat_nmr_x(:,i) .* (theta(i) * tau_r + r_hat * phi(i)) / (phi(i) + tau_r);
     end
 
-    nmr_x = sum(block_mat_nmr_x, 2);
-    dnm_x = sum(block_mat, 2) + ((1-lambda)/lambda) * exp(-cluster_block_exp_max-0.5*r_hat.^2/tau_r);
+    block_mat_2 = gamma * sqrt(tau_r/(psi+tau_r)) * exp( -0.5*r_hat.^2/(psi+tau_r) );
+    block_mat_nrm_x_2 = block_mat_2 .* (r_hat*psi ./ (psi+tau_r));
+    
+
+    nmr_x = sum(block_mat_nmr_x, 2) + block_mat_nrm_x_2;
+    dnm_x = sum(block_mat, 2) + block_mat_2 + ((1-lambda)/lambda) * exp(-0.5*r_hat.^2/tau_r);
 
     x_hat = nmr_x ./ (dnm_x);
+
+    % if dnm_x is zero, set x_hat to r_hat
+    dnm_x_zero_idx = (dnm_x==0);
+    x_hat(dnm_x_zero_idx) = r_hat(dnm_x_zero_idx);
 
     % compute tau_x
     block_mat_nmr_x_sq = block_mat;
@@ -198,13 +207,21 @@ function [x_hat, tau_x] = input_function(r_hat, tau_r, lambda, omega, theta, phi
         block_mat_nmr_x_sq(:,i) = block_mat_nmr_x_sq(:,i) .* (  phi(i)*tau_r/(phi(i) + tau_r) + ( (theta(i)*tau_r + r_hat*phi(i)) / (phi(i) + tau_r) ).^2  );
     end
 
-    nmr_x_sq = sum(block_mat_nmr_x_sq, 2);
+    block_mat_nmr_x_sq_2 = block_mat_2 .* ( psi*tau_r/(psi+tau_r) + ((r_hat*psi)/(psi+tau_r)).^2 );
+
+    nmr_x_sq = sum(block_mat_nmr_x_sq, 2) + block_mat_nmr_x_sq_2;
     dnm_x_sq = dnm_x;
 
-    tau_x = mean(nmr_x_sq ./ dnm_x_sq - x_hat.^2);  % this is nonnegative in theory
+    tau_x_seq = (nmr_x_sq ./ dnm_x_sq - x_hat.^2);  % this is nonnegative in theory
+
+    % if dnm_x is zero, set tau_x_seq to 0
+    tau_x_seq(dnm_x_zero_idx) = 0;
+
+    tau_x = mean(tau_x_seq);
     tau_x = max(tau_x, 1e-12);  % just in case
 
 end
+
 
 function [s_hat, tau_s] = output_function(p_hat, tau_p, y_lower, y_upper, tau_w)
    
@@ -247,59 +264,71 @@ function [s_hat, tau_s] = output_function(p_hat, tau_p, y_lower, y_upper, tau_w)
 
 end
 
-function [lambda, omega, theta, phi] = input_parameter_est(r_hat, tau_r, lambda, omega, theta, phi, kappa)
+function [lambda, omega, theta, phi, gamma, psi] = input_parameter_est(r_hat, tau_r, lambda, omega, theta, phi, gamma, psi, kappa)
    
     lambda_pre = lambda;
     omega_pre = omega;
     theta_pre = theta;
     phi_pre = phi;
+    gamma_pre = gamma;
+    psi_pre = psi;
 
-    % do we need some kind of normalization here?
     dim_smp=length(r_hat);
     num_cluster=length(omega);
 
-    cluster_block_exp_mat = zeros(dim_smp, num_cluster);
-    for (i=1:num_cluster)
-        cluster_block_exp_mat(:,i) = -0.5 * ( (theta(i)-r_hat).^2 ./ (phi(i)+tau_r) );
-    end
-
-    cluster_block_exp_max = zeros(dim_smp, 1);
-    for (i=1:dim_smp)
-        cluster_block_exp_max(i) = max(cluster_block_exp_mat(i,:));
-    end
 
     lambda_tmp_mat_1 = zeros(dim_smp, num_cluster);
     for (i = 1:num_cluster)
-        lambda_tmp_mat_1(:,i) = lambda * omega(i) * 1/sqrt(tau_r+phi(i)) * exp(-cluster_block_exp_max -0.5 * (r_hat-      theta(i)).^2 / (tau_r+phi(i)) );
+        lambda_tmp_mat_1(:,i) = lambda * (1-gamma) * omega(i) * 1/sqrt(tau_r+phi(i)) * exp( -0.5 * (r_hat-      theta(i)).^2 / (tau_r+phi(i)) );
     end
+
+    lambda_tmp_3 = lambda * gamma * 1/sqrt(tau_r+psi) * exp( -0.5*r_hat.^2 /(tau_r+psi));
 
 
     % compute lambda
     lambda_tmp_1 = sum(lambda_tmp_mat_1, 2);
-    lambda_tmp_2 = (1-lambda) * 1 / sqrt(tau_r) .* exp(-cluster_block_exp_max -0.5 * r_hat.^2 / tau_r);
+    lambda_tmp_2 = (1-lambda) * 1 / sqrt(tau_r) .* exp(-0.5 * r_hat.^2 / tau_r);
 
-    lambda_block_2 = lambda_tmp_2 ./ (lambda_tmp_1 + lambda_tmp_2);
+    lambda_tmp_sum = lambda_tmp_1 + lambda_tmp_2 + lambda_tmp_3;
+    lambda_tmp_sum_zero_idx = (lambda_tmp_sum==0);    % leave the outliers to the first Gaussian component
+
+    % this is where the outlier model comes into play when lambda_tmp_1+lambda_tmp_2 is zero
+    lambda_block_2 = lambda_tmp_2 ./ lambda_tmp_sum;
+    lambda_block_2(lambda_tmp_sum_zero_idx) = 0;
+
     lambda_block_1 = zeros(dim_smp, num_cluster);
     for (i=1:num_cluster)
-        lambda_block_1(:,i) = lambda_tmp_mat_1(:,i) ./ (lambda_tmp_1 + lambda_tmp_2);
+        lambda_block_1(:,i) = lambda_tmp_mat_1(:,i) ./ lambda_tmp_sum;
+        lambda_block_1(lambda_tmp_sum_zero_idx,i) = 0;
     end
 
-    lambda_new = sum(sum(lambda_block_1)) / (sum(lambda_block_2) + sum(sum(lambda_block_1)));
+    lambda_block_3 = lambda_tmp_3 ./ lambda_tmp_sum;
+    lambda_block_3(lambda_tmp_sum_zero_idx) = 1;
+
+
+    lambda_new = (sum(sum(lambda_block_1)) + sum(lambda_block_3)) / (sum(lambda_block_2) + sum(sum(lambda_block_1)) + sum(lambda_block_3));
     lambda = lambda + kappa * (lambda_new - lambda);
+
     
     % compute omega
     omega_new = sum(lambda_block_1);
     omega_new = omega_new';
     omega_new = omega_new / sum(omega_new);
-    
+
     omega = omega + kappa * (omega_new - omega);
+
+
+    % compute gamma
+    gamma_new = sum(lambda_block_3) / (sum(sum(lambda_block_1)) + sum(lambda_block_3));
+
+    %gamma_new
+    gamma = gamma + kappa * (gamma_new - gamma);
     
     % compute theta
-    theta_tmp_mat = lambda_tmp_mat_1;
-    theta_tmp_mat_sum = sum(theta_tmp_mat, 2);
-    for (i=1:num_cluster)
-        theta_tmp_mat(:,i) = theta_tmp_mat(:,i) ./ ( lambda_tmp_2 + theta_tmp_mat_sum );
-    end
+    % this is where the outlier model comes into play when lambda_tmp_mat_sum+lambda_tmp_2 is zero
+    theta_tmp_mat = lambda_block_1;
+    theta_tmp_mat_sum_1 = sum(theta_tmp_mat);
+    zero_idx=(theta_tmp_mat_sum_1==0);  % find the guassian mixtures with zero weight
     
     theta_tmp_mat_1 = theta_tmp_mat;
     theta_tmp_mat_2 = theta_tmp_mat;
@@ -308,20 +337,30 @@ function [lambda, omega, theta, phi] = input_parameter_est(r_hat, tau_r, lambda,
         theta_tmp_mat_2(:,i) = theta_tmp_mat_2(:,i) ./ (phi(i)+tau_r);
     end
     theta_new = sum(theta_tmp_mat_1) ./ sum(theta_tmp_mat_2);   % to avoid division by 0
+    theta_new(zero_idx) = theta(zero_idx);  % keep the gaussian mixtures with zero weight fixed
+
+    theta_new_inf_idx = isinf(theta_new);   % guard against the case of dision by 0
+    theta_new(theta_new_inf_idx) = theta(theta_new_inf_idx); % keep the gaussian mixtures with infinity theta fixed just in case
+
     theta_new = theta_new';
-    
+
     theta = theta + kappa * (theta_new - theta);
-    
+
     % compute phi
+    % what happens if theta_tmp_mat is 0/0
     phi_tmp_mat_1 = theta_tmp_mat;
     phi_tmp_mat_2 = theta_tmp_mat;
     for (i=1:num_cluster)
         phi_tmp_mat_1(:,i) = phi_tmp_mat_1(:,i) .* (r_hat-theta(i)).^2;
     end
     phi_new = sum(phi_tmp_mat_1) ./ sum(phi_tmp_mat_2) - tau_r ;
+    phi_new(zero_idx) = phi(zero_idx);  % keep the gaussian mixtures with zero weight fixed
+
+    phi_new_inf_idx = isinf(phi_new);   % guard against the case of dision by 0
+    phi_new(phi_new_inf_idx) = phi(phi_new_inf_idx); % keep the gaussian mixtures with infinity phi fixed just in case
+
     phi_new = phi_new';
     for (i=1:num_cluster)
-        %phi_new(i) = max(phi_new(i), 1e-12);    % make sure the variance is non-negative
         if (phi_new(i)<0)
             phi_new(i) = phi(i);
         end
@@ -329,7 +368,20 @@ function [lambda, omega, theta, phi] = input_parameter_est(r_hat, tau_r, lambda,
     
     phi = phi + kappa * (phi_new - phi);
 
+    % compute psi
+    psi_tmp_mat = lambda_block_3;
+    psi_tmp_mat_1 = psi_tmp_mat;
+    psi_tmp_mat_2 = psi_tmp_mat;
+    psi_new = sum(psi_tmp_mat_1 .* (r_hat.^2)) / sum(psi_tmp_mat_2) - tau_r;
+
+    if (psi_new<0)
+        psi_new = psi;
+    end
+
+    psi = psi + kappa * (psi_new - psi);
+
 end
+
 
 function tau_w = output_parameter_est(y_lower, y_upper, tau_w, p_hat, tau_p, kappa)
 

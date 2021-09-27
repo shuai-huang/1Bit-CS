@@ -5,25 +5,34 @@ M = sigma*N;      	% the number of measurements
 S = ceil(rho*N);  	% the number of nonzero entries
 
 num_c_true = 1; 	% the true number of Gaussian mixtures
-noise_std = 0.02;	% the noise standard deviation
-bit_num = 2;		% the quantization bit number
+meas_snr_val = 30;	% pre-quantization SNR (dB)
+cauchy_num = 1;   % the standard deviation of Gaussian component in BGM prior
+bit_num = 1;		% the quantization bit number
 
 LN_num = 2;						% the number of computing threads
 LN = maxNumCompThreads(LN_num);	% set the largest number of computing threads
 
 max_pe_ite = 20;		% the maximum number of iterations for AMP-PE and AMP-AWGN
-max_pe_inner_ite = 10;	% the maximum number of inner iterations to estimate the parameters
+max_pe_inner_ite = 20;	% the maximum number of inner iterations to estimate the parameters
 max_oracle_ite = 20;	% the maximum number of iterations for AMP-oracle, note that for some cases, AMP-oracle needs more iterations to get the best performance
 max_ite = 1000;			% the maximum number of iterations for IHT, OMP, CoSaMP, L1-min
 cvg_thd = 1e-6; 		% convergence threshold
-kappa = 1;      		% learning rate or damping rate
+kappa = 0.1;      		% damping rate in parameter estimation
+eta = 1;                % damping rate in signal recovery
 verbose = 0;			% "1" - output convergence values in every iteration; "0" - do not output convergence values in every iteration
 
 % set the quantization thresholds and step size properly
 % they need to be adjusted for different signals
-quant_thd_min = -1;										% the minimum quantization threshold
-quant_thd_max = 1;										% the maximum quantization threshold
-quant_step = (quant_thd_max-quant_thd_min)/(2^bit_num);	% quantizatin step size
+
+quant_thd_min = -15000;         % the minimum quantization threshold
+quant_thd_max = 15000;          % the maximum quantization threshold
+% just make sure the precision is high enough when rho = 0.1
+if (rho==0.1)
+    quant_thd_min = -15000;
+    quant_thd_max = 15000;
+end
+
+quant_step = (quant_thd_max-quant_thd_min)/(2^bit_num);     % quantizatin step size
 
 % compute the quantization thresholds
 quant_thd = quant_thd_min;
@@ -50,15 +59,13 @@ for (trial_num = 1:10)
     omega_true = omega_true/sum(omega_true);
 
     nonzeroW = [];      % nonzero entries
-    theta_true = [];    % true Gaussian mixtures means
-    phi_true = [];      % true Gaussian mixtures variances
+    theta_true = [];    % true Cauchy mixtures means
     for (i=1:num_c_true)
         theta_tmp = 0;  % make sure the mean is 0 for this particular 1bit CS 
         theta_true = [theta_true; theta_tmp];
-        phi_tmp = 1;	% fix the variance to make sure the noise level is fixed
-        phi_true = [phi_true; phi_tmp];
+
         S_tmp = round(S*omega_true(i));
-        nonzeroW = [nonzeroW; normrnd(theta_tmp, sqrt(phi_tmp), S_tmp, 1)];	% the nonzero entries
+        nonzeroW = [nonzeroW; theta_tmp + cauchy_num*tan(pi*(rand(S_tmp,1)-0.5))];
     end
 
     % double check since we rounded the number  before
@@ -72,19 +79,20 @@ for (trial_num = 1:10)
     x(indice) = nonzeroW;   % true signal
 
     % the measurement matrix A
-    % each column is normalized so that the rows of A have unit norms
     A = randn(M,N);
-    A_norm=sqrt(sum(A.^2));
-    for(j=1:N)
-        A(:,j)=A(:,j)/A_norm(j);
-    end
+
+	% needed for scalar-version AMP computation    
+    A_sq_sum = norm(A, 'fro')^2;  % compute the squared frobenius norm of A
     
-	% needed for vector-version AMP computation    
-	A_sq = abs(A).^2;  % compute the square of A
-
     y_noiseless = A*x;    % noiseless linear measurements
+    noise_ori = normrnd(0, 1, size(y_noiseless));
+    mut_factor = sqrt(sum(y_noiseless.^2)/sum(noise_ori.^2) / 10^(meas_snr_val/10));
 
-    y_ori = y_noiseless + normrnd(0, noise_std, size(y_noiseless));	% noisy measurements
+    if (meas_snr_val>100)
+        mut_factor = 0;
+    end
+
+    y_ori = y_noiseless + mut_factor * noise_ori;
 
     % convert "y_ori" to quantized symbols "y" in the set {2,3,4,5,6,...}
     % "y_quant" is the "low resolution" version of the "y_ori"
@@ -158,8 +166,8 @@ for (trial_num = 1:10)
     s_hat = zeros(M,1); 		% initialize s_hat with all zeros
 
     % initialize input distribution parameters
-    lambda = 0.5;			% the sparsity ratio
-	num_c = 1;				% the number of Gaussian mixture component
+    lambda = 0.1;			% the sparsity ratio
+	num_c = 5;				% the number of Gaussian mixture component
 
     % initialize Gaussian mixtures parameters
     theta=zeros(num_c, 1);  % Gaussian mean
@@ -180,6 +188,9 @@ for (trial_num = 1:10)
             omega(i) = 0;
         end
     end
+    
+    gamma = 0.01;               % the weight of the outlier distribution (a zero-mean Gaussian)
+    psi = var(x_hat_nz)+1e-12;  % the variance of the outlier distribution (a zero-mean Gaussian)
 
     % initialize white Gaussian noise variance
     tau_w = 1e-6;
@@ -188,15 +199,16 @@ for (trial_num = 1:10)
     x_hat = zeros(N,1);
 
     % set GAMP parameters
-    gamp_par.A_sq	= A_sq;					% the squared version of the measurement matrix
+    gamp_par.A_sq_sum	= A_sq_sum;			% the Frobenius norm of the measurement matrix
     gamp_par.max_pe_ite    = max_pe_ite;	% maximum number of iterations for AMP
     gamp_par.max_pe_inner_ite = max_pe_inner_ite;	% maximum number of inner iterations for parameter estimation
     gamp_par.cvg_thd    = cvg_thd; 			% the convergence threshold
-    gamp_par.kappa      = kappa;   			% learning rate
+    gamp_par.kappa      = kappa;   			% damping rate for parameter estimation
+    gamp_par.eta        = eta;              % damping rate for signal recovery
     gamp_par.verbose	= verbose;			% "0" or "1", decides whether to output convergence values in each iteration
 
     gamp_par.x_hat      = x_hat; 		  			% initialize with all zero vector
-    gamp_par.tau_x      = repmat(tau_x, [N 1]);		% signal variance
+    gamp_par.tau_x      = tau_x;		% signal variance
     gamp_par.s_hat      = s_hat;   					% dummy variable from output function
 
     % set input distribution parameters
@@ -205,6 +217,9 @@ for (trial_num = 1:10)
     input_par.phi       = phi;    	% the variances of the Gaussian mixtures
     input_par.omega     = omega;  	% the weights of the Gaussian mixtures
     input_par.num_c     = num_c;  	% the number of Gaussian mixtures
+    input_par.gamma     = gamma;    % the weight of the outlier distribution (a zero-mean Gaussian)
+    input_par.psi       = psi;      % the variance of the outlier distribution (a zero-mean Gaussian)
+
 
     % set output distribution parameters
     output_par.tau_w    = tau_w; 		% the white-Gaussian noise variance
@@ -217,14 +232,11 @@ for (trial_num = 1:10)
     %% AMP-PE recovery %%
     %%%%%%%%%%%%%%%%%%%%%
 
-    [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_vect(A, y, gamp_par, input_par, output_par);
+    [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_scalar(A, y, gamp_par, input_par, output_par);
 
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
-    end
+	% Due to some extremely large entries in the signal, the range of the quantizer is also very large. 
+	% Sometimes when the signal happens to have small-valued entries, this causes the magnitude info to be lost, we thus need to normalize the recover signal not just in 1-bit case, but also in 2-bit and 3-bit cases
+    nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
     nmse_seq = [nmse_seq nmse_val];
 
     
@@ -232,20 +244,17 @@ for (trial_num = 1:10)
     %% AMP-AWGN recovery %%
     %%%%%%%%%%%%%%%%%%%%%%%
     
-    [res, input_par_new, output_par_new] = gamp_bgm_vect(A, y_quant, gamp_par, input_par, output_par);
+    [res, input_par_new, output_par_new] = gamp_bgm_scalar(A, y_quant, gamp_par, input_par, output_par);
     
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
-    end
+	% Due to some extremely large entries in the signal, the range of the quantizer is also very large. 
+	% Sometimes when the signal happens to have small-valued entries, this causes the magnitude info to be lost, we thus need to normalize the recover signal not just in 1-bit case, but also in 2-bit and 3-bit cases
+    nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
     nmse_seq = [nmse_seq nmse_val];
 
     
-    %%%%%%%%%%%%%%%%%%
-    %% IHT recovery %%
-    %%%%%%%%%%%%%%%%%%
+    %%%%%%%%%%%%%%%%%%%
+    %% QIHT recovery %%
+    %%%%%%%%%%%%%%%%%%%
     x_hat = zeros(N,1);
 
     % normalized the matrix and measurements as required by iterative hard thresholding
@@ -256,17 +265,16 @@ for (trial_num = 1:10)
     Par.tol = cvg_thd;
     Par.X0 = x_hat;
     Par.maxiter = max_ite;
+    Par.quant_thd = quant_thd/sqrt(max(diag(S_diag)));
+    Par.normalization_cst = sqrt(max(diag(S_diag)));
 
     K = length(nonzeroW);
 
-    res = ssr_iht_multi_bit_k(y_quant_normalized, A_normalized, Par, K);
+    res = ssr_qiht_multi_bit_k(y_quant_normalized, A_normalized, Par, K);
 
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
-    end
+	% Due to some extremely large entries in the signal, the range of the quantizer is also very large. 
+	% Sometimes when the signal happens to have small-valued entries, this causes the magnitude info to be lost, we thus need to normalize the recover signal not just in 1-bit case, but also in 2-bit and 3-bit cases
+    nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
     nmse_seq = [nmse_seq nmse_val];
 
     
@@ -283,14 +291,11 @@ for (trial_num = 1:10)
 
     K = length(nonzeroW);
 
-    res = OMP_init(A, y_quant, K, Par);
+    res = OMP_init(A, y_quant, K, [], Par);
 
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
-    end
+	% Due to some extremely large entries in the signal, the range of the quantizer is also very large. 
+	% Sometimes when the signal happens to have small-valued entries, this causes the magnitude info to be lost, we thus need to normalize the recover signal not just in 1-bit case, but also in 2-bit and 3-bit cases
+    nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
     nmse_seq = [nmse_seq nmse_val];
     
     
@@ -311,12 +316,9 @@ for (trial_num = 1:10)
 
     res = CoSaMP_init_fast(A, y_quant, K, Par);
 
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
-    end
+	% Due to some extremely large entries in the signal, the range of the quantizer is also very large. 
+	% Sometimes when the signal happens to have small-valued entries, this causes the magnitude info to be lost, we thus need to normalize the recover signal not just in 1-bit case, but also in 2-bit and 3-bit cases
+    nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
     nmse_seq = [nmse_seq nmse_val];
 
     
@@ -338,55 +340,17 @@ for (trial_num = 1:10)
     Par.fun = 'l1';
     Par.p = 1;
 
-	% remember to tune the regularization parameter lambda_reg for different types of signals
-	lambda_reg = 0.4;
+    %%%%%%%%%%%%%
+	%% *must* tune the regularization parameter lambda_reg for different types of signals
+	%%%%%%%%%%%%%
+	
+	lambda_reg = 6.5e+05;
 
     res = ssr_l1(y_quant, A, Par, lambda_reg);
 
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res-x, 'fro')^2);;
-    end
-    nmse_seq = [nmse_seq nmse_val];
-    
-    
-    %%%%%%%%%%%%%%%%%%%%%%%%%
-    %% AMP-oracle recovery %%
-    %%%%%%%%%%%%%%%%%%%%%%%%%
-    
-    clear gamp_par input_par output_par;
-    
-    % set GAMP parameters
-    gamp_par.A_sq	= A_sq;					% the squared version of the measurement matrix
-    gamp_par.max_pe_ite    = max_oracle_ite;	% maximum number of iterations for AMP
-    gamp_par.cvg_thd    = cvg_thd;	 		% the convergence threshold
-    gamp_par.verbose	= verbose;			% "0" or "1", decides whether to output convergence values in each iteration
-
-    gamp_par.x_hat      = zeros(N,1);   			% estimated signal
-    gamp_par.tau_x      = repmat(tau_x, [N 1]);   	% signal variance
-    gamp_par.s_hat      = s_hat;   					% dummy variable from output function
-
-    % set input distribution parameters
-    input_par.lambda    = rho; 			% the sparity ratio
-    input_par.theta     = theta_true;  	% the means of the Gaussian mixtures
-    input_par.phi       = phi_true;    	% the variances of the Gaussian mixtures
-    input_par.omega     = omega_true;  	% the weights of the Gaussian mixtures
-    input_par.num_c     = num_c_true;  	% the number of Gaussian mixtures
-
-    % set output distribution parameters
-    output_par.tau_w    = noise_std^2; 	% the white-Gaussian noise variance
-    output_par.quant_thd = quant_thd; 	% quantization threshold
-    
-    [res, input_par_new, output_par_new] = gamp_bgm_multi_bit_vect_oracle(A, y, gamp_par, input_par, output_par);
-    
-	% for 1-bit CS the magnitude info is lost, we need to normalize it first
-	if (bit_num==1)
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat/sum(abs(res.x_hat))*sum(abs(x))-x, 'fro')^2);;
-    else
-    	nmse_val = -10*log10(norm(x, 'fro')^2/norm(res.x_hat-x, 'fro')^2);
-    end
+	% Due to some extremely large entries in the signal, the range of the quantizer is also very large. 
+	% Sometimes when the signal happens to have small-valued entries, this causes the magnitude info to be lost, we thus need to normalize the recover signal not just in 1-bit case, but also in 2-bit and 3-bit cases
+    nmse_val = -10*log10(norm(x, 'fro')^2/norm(res/sum(abs(res))*sum(abs(x))-x, 'fro')^2);
     nmse_seq = [nmse_seq nmse_val];
 
 	
@@ -400,13 +364,13 @@ nmse_seq_mean = mean(nmse_seq_mat);
 nmse_seq_upper = std(nmse_seq_mat);
 nmse_seq_lower = std(nmse_seq_mat);
 
-nmse_x = categorical({'AMP-PE', 'AMP-AWGN', 'IHT', 'OMP', 'CoSaMP', 'L1-Min', 'AMP-Oracle'});
-nmse_x = reordercats(nmse_x, {'AMP-PE', 'AMP-AWGN', 'IHT', 'OMP', 'CoSaMP', 'L1-Min', 'AMP-Oracle'});
+nmse_x = categorical({'AMP-PE', 'AMP-AWGN', 'QIHT', 'OMP', 'CoSaMP', 'L1-Min'});
+nmse_x = reordercats(nmse_x, {'AMP-PE', 'AMP-AWGN', 'QIHT', 'OMP', 'CoSaMP', 'L1-Min'});
 
 figure;
 bar(nmse_x, nmse_seq_mean);
 ylabel('NMSE (dB)')
-title('2-bit CS: M/N=2, S/N=10%, \sigma_w=0.02')
+title({'Nonzero entries follow Cauchy distribution','1-bit CS: M/N=2, E/N=10%, pre-QNT SNR=30dB'})
 hold on
 er = errorbar(nmse_x, nmse_seq_mean, nmse_seq_lower, nmse_seq_upper);
 er.Color = [0 0 0];
