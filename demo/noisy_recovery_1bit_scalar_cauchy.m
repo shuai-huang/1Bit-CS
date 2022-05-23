@@ -174,7 +174,7 @@ for (trial_num = 1:10)
     phi=ones(num_c, 1);     % Gaussian variance
     omega=zeros(num_c,1);   % Gaussian mixture weights
 
-    x_hat_nz = abs(x_hat(x_hat~=0));
+    x_hat_nz = x_hat(x_hat~=0);
     idx_seq = kmeans(x_hat_nz, num_c);
     for (i=1:num_c)
         x_hat_tmp = x_hat_nz(idx_seq==i);

@@ -7,15 +7,15 @@
 
 * This package contains code files to implement the approach described in the following paper.
 ```
-@article{1bitCS_AMP_PE,
-    author    = {Shuai Huang and Deqiang Qiu and Trac D. Tran},
-    title     = {1-Bit Compressive Sensing via Approximate Message Passing with Built-in Parameter Estimation},
-    journal   = {CoRR},
-    volume    = {abs/2007.07679},
-    year      = {2020},
-    url       = {http://arxiv.org/abs/2007.07679},
-    archivePrefix = {arXiv},
-    eprint    = {2007.07679}
+@article{QM_AMP_PE,
+    author={Shuai Huang and Deqiang Qiu and Trac D. Tran},
+    journal={IEEE Transactions on Signal Processing}, 
+    title={Approximate Message Passing With Parameter Estimation for Heavily Quantized Measurements}, 
+    year={2022},
+    volume={70},
+    number={},
+    pages={2062-2077},
+    doi={10.1109/TSP.2022.3167516}
 }
 ```
 If you use this package and find it helpful, please cite the above paper. Thanks :smile:
